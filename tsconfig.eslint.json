@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "strict": true
+  },
+  "include": [
+    "public/**/*.ts",
+    "server/**/*.ts",
+    "shared/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/eslint.config.js",
+    "eslint.config.js"
+  ]
+}

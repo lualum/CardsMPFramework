@@ -1,0 +1,41 @@
+{
+   "scripts": {
+      "clean": "rm -rf public/dist server/dist shared/dist",
+      "prebuild": "npm run clean && mkdir -p public/dist server/dist shared/dist",
+      "build:public": "esbuild public/*.ts --bundle --outdir=public/dist --sourcemap --minify",
+      "build:server": "esbuild server/*.ts --bundle --platform=node --external:express --external:socket.io --outdir=server/dist --sourcemap --minify",
+      "build:shared": "esbuild shared/*.ts --bundle --platform=node --outdir=shared/dist --sourcemap --minify",
+      "build": "npm run build:public && npm run build:server && npm run build:shared",
+      "build:public:watch": "esbuild public/*.ts --bundle --outdir=public/dist --sourcemap --minify --watch",
+      "build:server:watch": "esbuild server/*.ts --bundle --platform=node --external:express --external:socket.io --outdir=server/dist --sourcemap --minify --watch",
+      "build:shared:watch": "4esbuild shared/*.ts --bundle --platform=node --outdir=shared/dist --sourcemap --minify --watch",
+      "build:watch": "concurrently -n public,server,shared \"npm run build:public:watch\" \"npm run build:server:watch\" \"npm run build:shared:watch\"",
+      "start:server": "nodemon --watch server/dist --watch public/dist --watch shared/dist --exec 'clear && node --no-deprecation' server/dist/server.js",
+      "start": "npm run build && node --no-deprecation server/dist/server.js",
+      "dev": "concurrently --raw -n build,server \"npm run build:watch\" \"npm run start:server\"",
+      "host": "npm run build > /dev/null 2>&1 && concurrently --raw -n server,funnel \"node --no-deprecation server/dist/server.js\" \"tailscale funnel 127.0.0.1:${PORT:-3000}\""
+   },
+   "dependencies": {
+      "express": "^5.2.1",
+      "socket.io": "^4.8.1",
+      "esbuild": "^0.27.1"
+   },
+   "devDependencies": {
+      "@types/express": "^5.0.6",
+      "@types/node": "^25.0.1",
+      "@typescript-eslint/eslint-plugin": "^8.49.0",
+      "@typescript-eslint/parser": "^8.49.0",
+      "concurrently": "^9.2.1",
+      "dotenv": "^17.2.3",
+      "eslint": "^9.39.2",
+      "eslint-config-prettier": "^10.1.8",
+      "eslint-plugin-prettier": "^5.5.4",
+      "eslint-plugin-unicorn": "^62.0.0",
+      "globals": "^16.5.0",
+      "jiti": "^2.6.1",
+      "nodemon": "^3.1.11",
+      "prettier": "^3.7.4",
+      "socket.io-client": "^4.8.1",
+      "typescript": "^5.9.3"
+   }
+}
