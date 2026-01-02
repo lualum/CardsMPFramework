@@ -70,7 +70,7 @@ export function setupHandlers(socket: GameSocket): void {
       )
          return;
 
-      if (socket.room.game.currentPlayerId !== socket.player.id) {
+      if (socket.room.game.current.id !== socket.player.id) {
          socket.emit("error", "Not your turn");
          return;
       }
@@ -90,7 +90,7 @@ export function setupHandlers(socket: GameSocket): void {
             socket.player.id,
             socket.room.game.bottom
          );
-         socket.room.game.becomeLandlord(socket.player.id);
+         socket.room.game.becomeLandlord();
       }
    });
 
@@ -112,7 +112,7 @@ export function setupHandlers(socket: GameSocket): void {
       io.to(socket.room.code).emit("p-played-cards", cards);
 
       if (result) {
-         const isLandlord = socket.player.id === socket.room.game.landlordId;
+         const isLandlord = socket.player.id === socket.room.game.landlord?.id;
          const reason = isLandlord ? "Landlord victory!" : "Farmers victory!";
 
          io.to(socket.room.code).emit("ended-room", reason);

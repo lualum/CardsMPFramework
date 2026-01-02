@@ -3,59 +3,67 @@ import type { Player } from "./player";
 
 export interface SerializedGame {
    bottom: Card[];
-   currentPlayerId: string;
+   currentIndex: number;
    lastPlay: Play | undefined;
    phase: GamePhase;
-   players: Record<string, Player>;
+   players: Player[];
    bet: number;
-   landlordId: string | undefined;
+   landlordIndex: number | undefined;
 }
 
 export class Game {
    bottom: Card[] = [];
-   players: Map<string, Player> = new Map();
-   currentPlayerId: string = "";
+   players: Player[] = [];
+   currentIndex: number = 0;
    bet: number = 0;
-   landlordId: string | undefined = undefined;
+   landlordIndex: number | undefined = undefined;
    lastPlay: Play | undefined = undefined;
-   phase: GamePhase = GamePhase.BIDDING;
+   phase: GamePhase = GamePhase.FINISHED;
 
    constructor() {}
 
    serialize(): SerializedGame {
       return {
          bottom: this.bottom,
-         currentPlayerId: this.currentPlayerId,
+         currentIndex: this.currentIndex,
          lastPlay: this.lastPlay,
          phase: this.phase,
-         players: Object.fromEntries(this.players),
+         players: this.players,
          bet: this.bet,
-         landlordId: this.landlordId,
+         landlordIndex: this.landlordIndex,
       };
    }
 
    static deserialize(data: SerializedGame): Game {
       const game = new Game();
       game.bottom = data.bottom;
-      game.currentPlayerId = data.currentPlayerId;
+      game.currentIndex = data.currentIndex;
       game.lastPlay = data.lastPlay;
       game.phase = data.phase;
-      game.players = new Map(Object.entries(data.players));
+      game.players = data.players;
       game.bet = data.bet;
-      game.landlordId = data.landlordId;
+      game.landlordIndex = data.landlordIndex;
       return game;
+   }
+
+   get current(): Player {
+      return this.players[this.currentIndex];
+   }
+
+   get landlord(): Player | undefined {
+      if (this.landlordIndex === undefined) return undefined;
+      return this.players[this.landlordIndex];
    }
 
    // Server Only
    startGame(players: Player[]): void {
-      this.players.clear();
-      for (const player of players) this.players.set(player.id, player);
+      this.players = [...players];
 
       this.initializeDeck();
       this.shuffleDeck();
       this.dealCards();
       this.phase = GamePhase.BIDDING;
-      this.currentPlayerId = players[0].id;
+      this.currentIndex = 0;
    }
 
    // Server Only
@@ -90,57 +98,49 @@ export class Game {
    private dealCards(): void {
       let cardIndex = 3;
 
-      for (const player of this.players.values()) player.hand = new Hand([]);
+      for (const player of this.players) player.hand = new Hand([]);
       for (let index = 0; index < 17; index++) {
          // 17 cards per player in DDZ
-         for (const player of this.players.values())
+         for (const player of this.players)
             player.hand.cards.push(this.bottom[cardIndex++]);
       }
 
-      for (const player of this.players.values()) player.hand.sort();
+      for (const player of this.players) player.hand.sort();
    }
 
    betLandlord(bet: number): boolean | undefined {
-      const player = this.players.get(this.currentPlayerId);
-      if (!player) return undefined;
-
       if (bet > this.bet) {
          this.bet = bet;
-         this.landlordId = player.id;
+         this.landlordIndex = this.currentIndex;
          if (bet === 3) return true;
       }
 
       // Move to next player
-      const playerIds = [...this.players.keys()];
-      const currentIndex = playerIds.indexOf(this.currentPlayerId);
-      const nextIndex = (currentIndex + 1) % playerIds.length;
-      this.currentPlayerId = playerIds[nextIndex];
+      this.currentIndex = (this.currentIndex + 1) % this.players.length;
 
       // If the next player is landlord, betting ends
-      return this.currentPlayerId === this.landlordId;
+      return this.currentIndex === this.landlordIndex;
    }
 
-   becomeLandlord(playerId: string, bottom = this.bottom): void {
+   becomeLandlord(bottom = this.bottom): void {
       if (this.phase !== GamePhase.BIDDING) return;
 
-      const player = this.players.get(playerId);
-      if (!player) return;
+      const player = this.players[this.currentIndex];
 
       player.hand.cards.push(...bottom);
       player.hand.sort();
 
       this.bottom = [];
       this.phase = GamePhase.PLAYING;
-      this.currentPlayerId = player.id;
+      this.currentIndex = this.currentIndex;
       this.lastPlay = undefined;
-      this.landlordId = player.id;
+      this.landlordIndex = this.currentIndex;
    }
 
    playCards(cards: Card[], check = true): boolean | undefined {
       if (this.phase !== GamePhase.PLAYING) return undefined;
 
-      const player = this.players.get(this.currentPlayerId);
-      if (!player) return undefined;
+      const player = this.players[this.currentIndex];
 
       if (!check) {
          player.hand.remove(cards, false);
@@ -155,7 +155,7 @@ export class Game {
             cards,
             type: playType.type,
             value: playType.value,
-            playerId: player.id,
+            playerIndex: this.currentIndex,
          };
 
          if (this.lastPlay && !Game.canBeat(play, this.lastPlay))
@@ -171,12 +171,9 @@ export class Game {
       }
 
       // Move to next player logic
-      const playerIds = [...this.players.keys()];
-      const currentIndex = playerIds.indexOf(this.currentPlayerId);
-      const nextIndex = (currentIndex + 1) % playerIds.length;
-      this.currentPlayerId = playerIds[nextIndex];
+      this.currentIndex = (this.currentIndex + 1) % this.players.length;
 
-      if (this.lastPlay && this.lastPlay.playerId === this.currentPlayerId)
+      if (this.lastPlay && this.lastPlay.playerIndex === this.currentIndex)
          this.lastPlay = undefined;
 
       return false;
@@ -409,7 +406,7 @@ export interface Play {
    cards: Card[];
    type: PlayType;
    value: number;
-   playerId: string;
+   playerIndex: number;
 }
 
 export class Hand {

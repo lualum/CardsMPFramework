@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import type { Card } from "../shared/card";
+import type { Game } from "../shared/game";
+import { gs } from "./session";
 
 type CardMesh = THREE.Mesh<
    THREE.PlaneGeometry,
@@ -9,18 +11,11 @@ type CardMesh = THREE.Mesh<
    userData: {
       card: Card;
       index: number;
+      seat: number;
       selected: boolean;
-      originalY: number; // Store base Y to handle selection cleanly
+      originalY: number;
    };
 };
-
-export interface CircularLayoutConfig {
-   radius: number;
-   arcAngle: number; // The total spread of the cards in degrees
-   yOffset: number; // Height adjustment
-   zOffset: number; // Depth adjustment (distance from camera)
-   tiltX: number; // X-axis tilt (leaning back)
-}
 
 export class CardThreeUI {
    private scene: THREE.Scene;
@@ -31,52 +26,48 @@ export class CardThreeUI {
    private mouse: THREE.Vector2;
    private container: HTMLElement;
    private textureLoader: THREE.TextureLoader;
-   private selectedCards: Set<number> = new Set();
+   private selectedCards: Set<string> = new Set();
 
+   private readonly TABLE_RADIUS = 8;
    private readonly CARD_WIDTH = 2;
    private readonly CARD_HEIGHT = 3;
    private readonly HOVER_SCALE = 1.1;
    private readonly SELECTED_LIFT = 0.5;
+   private readonly CARD_SPACING = 0.5;
 
-   // Default configuration
-   private circularLayout: CircularLayoutConfig = {
-      radius: 20, // Larger radius = flatter arc
-      arcAngle: 60, // Tighter spread
-      yOffset: -1,
-      zOffset: 0,
-      tiltX: 10, // Set to 0 for true top-down view
-   };
+   private readonly CAMERA_FOV = 45;
+   private readonly CAMERA_NEAR = 0.1;
+   private readonly CAMERA_FAR = 1000;
+   private readonly CAMERA_POS_X = 0;
+   private readonly CAMERA_POS_Y = 5;
+   private readonly CAMERA_POS_Z = 15;
 
-   constructor(
-      containerId: string,
-      layoutConfig?: Partial<CircularLayoutConfig>
-   ) {
+   constructor(containerId: string) {
       this.container = document.querySelector(containerId) as HTMLElement;
 
-      if (layoutConfig)
-         this.circularLayout = { ...this.circularLayout, ...layoutConfig };
-
-      // 1. Scene Setup
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x1a_1a_1a);
 
-      // 2. Camera Setup - Bird's eye view
       this.camera = new THREE.PerspectiveCamera(
-         45,
+         this.CAMERA_FOV,
          this.container.clientWidth / this.container.clientHeight,
-         0.1,
-         1000
+         this.CAMERA_NEAR,
+         this.CAMERA_FAR
       );
-      // Position camera higher and angled down for a table-top view
-      this.camera.position.set(0, 12, 15);
+      // Repositioned camera to view seat 0's hand from behind
+      this.camera.position.set(
+         this.CAMERA_POS_X,
+         this.CAMERA_POS_Y,
+         this.CAMERA_POS_Z
+      );
       this.camera.lookAt(0, 0, 0);
 
-      // 3. Renderer Setup - Optimized for pixel art and transparency
       this.renderer = new THREE.WebGLRenderer({
-         antialias: false, // Disabled for pixel art
+         antialias: false,
          alpha: true,
-         premultipliedAlpha: false, // Better transparency handling
+         premultipliedAlpha: false,
       });
+
       this.renderer.setSize(
          this.container.clientWidth,
          this.container.clientHeight
@@ -85,15 +76,11 @@ export class CardThreeUI {
       this.renderer.shadowMap.enabled = true;
       this.container.append(this.renderer.domElement);
 
-      // 4. Interaction Tools
       this.raycaster = new THREE.Raycaster();
       this.mouse = new THREE.Vector2();
       this.textureLoader = new THREE.TextureLoader();
 
-      // 5. Lighting
       this.setupLighting();
-
-      // 6. Listeners & Loop
       this.setupEventListeners();
       this.animate();
    }
@@ -112,11 +99,11 @@ export class CardThreeUI {
 
    private setupEventListeners(): void {
       window.addEventListener("resize", () => this.onWindowResize());
-      this.renderer.domElement.addEventListener("click", (e) =>
-         this.onCardClick(e)
+      this.renderer.domElement.addEventListener("click", (event) =>
+         this.onCardClick(event)
       );
-      this.renderer.domElement.addEventListener("mousemove", (e) =>
-         this.onMouseMove(e)
+      this.renderer.domElement.addEventListener("mousemove", (event) =>
+         this.onMouseMove(event)
       );
    }
 
@@ -130,8 +117,6 @@ export class CardThreeUI {
       );
    }
 
-   // --- Interaction Logic ---
-
    private updateMouseCoords(event: MouseEvent): void {
       const rect = this.renderer.domElement.getBoundingClientRect();
       this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -144,13 +129,10 @@ export class CardThreeUI {
 
       const intersects = this.raycaster.intersectObjects(this.cardMeshes);
 
-      // Reset scales
       for (const mesh of this.cardMeshes) {
          if (!mesh.userData.selected) {
             mesh.scale.setScalar(1);
-            // Optional: minimal Z-fighting prevention on hover reset
-            mesh.position.z =
-               mesh.userData.originalY + mesh.userData.index * 0.01;
+            mesh.position.y = mesh.userData.originalY;
          }
       }
 
@@ -158,9 +140,6 @@ export class CardThreeUI {
          const hoveredCard = intersects[0].object as CardMesh;
          if (!hoveredCard.userData.selected)
             hoveredCard.scale.setScalar(this.HOVER_SCALE);
-         // Pop slightly forward towards camera to avoid clipping neighbors
-         // Note: In our setup, Camera Z is positive, so we increase Z slightly
-         // But we need to account for rotation. Simpler to just scale for now.
 
          this.renderer.domElement.style.cursor = "pointer";
       } else {
@@ -175,103 +154,61 @@ export class CardThreeUI {
 
       if (intersects.length > 0) {
          const clickedMesh = intersects[0].object as CardMesh;
-         const index = clickedMesh.userData.index;
+         const cardKey = `${clickedMesh.userData.seat}-${clickedMesh.userData.index}`;
 
-         if (this.selectedCards.has(index)) {
-            this.selectedCards.delete(index);
+         if (this.selectedCards.has(cardKey)) {
+            this.selectedCards.delete(cardKey);
             clickedMesh.userData.selected = false;
          } else {
-            this.selectedCards.add(index);
+            this.selectedCards.add(cardKey);
             clickedMesh.userData.selected = true;
          }
 
-         // Animate/Move to new position
-         this.updateCardPosition(
-            clickedMesh,
-            index,
-            this.cardMeshes.length,
-            clickedMesh.userData.selected
-         );
+         this.updateCardPosition(clickedMesh);
       }
    }
 
-   // --- Core Layout Logic ---
+   private updateCardPosition(mesh: CardMesh): void {
+      const seat = mesh.userData.seat;
+      const index = mesh.userData.index;
+      const isSelected = mesh.userData.selected;
 
-   /**
-    * Calculates the position on a circle arc.
-    * * The logic defines a virtual "Pivot" point behind the cards.
-    * angle = 0 is the center of the hand.
-    */
-   private updateCardPosition(
-      mesh: CardMesh,
-      index: number,
-      totalCards: number,
-      isSelected: boolean
-   ): void {
-      const { radius, arcAngle, yOffset, zOffset, tiltX } = this.circularLayout;
+      // Get hand size for this seat - use actual game data
+      const handSize = this.cardMeshes.filter(
+         (m) => m.userData.seat === seat
+      ).length;
 
-      // 1. Calculate Angle
-      // Convert total arc to radians
-      const totalArcRad = THREE.MathUtils.degToRad(arcAngle);
-      // Calculate step between cards
-      const step = totalCards > 1 ? totalArcRad / (totalCards - 1) : 0;
-      // Start from the negative half to center the arc around 0
-      const startAngle = -totalArcRad / 2;
-      const angle = startAngle + index * step;
+      // Calculate angle for this seat around the table
+      const totalPlayers =
+         Math.max(...this.cardMeshes.map((m) => m.userData.seat)) + 1;
+      const seatAngle = (seat / totalPlayers) * Math.PI * 2;
 
-      // 2. Calculate Position (Polar coordinates)
-      // We assume the pivot point is at (0, 0, radius + zOffset)
-      // This ensures that the apex of the arc (angle 0) is at z = zOffset.
+      // Calculate position of hand center
+      const centerX = Math.sin(seatAngle) * this.TABLE_RADIUS;
+      const centerZ = Math.cos(seatAngle) * this.TABLE_RADIUS;
 
-      const x = Math.sin(angle) * radius;
+      // Calculate offset for this card within the hand
+      const cardOffset = (index - (handSize - 1) / 2) * this.CARD_SPACING;
 
-      // Z calculation:
-      // At angle 0, cos(0)=1. We want z to be zOffset.
-      // We want the arc to curve AWAY from the camera (concave for the viewer).
-      // Standard Circle: z = cos(angle) * radius.
-      // To anchor the center card at zOffset:
-      // z = zOffset + radius * (1 - Math.cos(angle))  -> Curves towards camera
-      // z = zOffset - radius * (1 - Math.cos(angle))  -> Curves away from camera
+      // Calculate perpendicular direction for spreading cards
+      const perpAngle = seatAngle + Math.PI / 2;
+      const offsetX = Math.sin(perpAngle) * cardOffset;
+      const offsetZ = Math.cos(perpAngle) * cardOffset;
 
-      // Let's use "Curved towards camera" (standard hand hold)
-      // This means the center card is furthest back, sides come forward.
-      // Or "Curved on table" (sides go back).
-
-      // Implementation: Fixed Pivot point at (0, 0, zOffset - radius)
-      // This makes the arc curve towards the camera (Concave).
-      const z = zOffset - radius + Math.cos(angle) * radius;
-
-      // Apply selection lift
-      // If selected, we move it "up" (Y) and slightly "forward" (Z) relative to camera
-      const lift = isSelected ? this.SELECTED_LIFT : 0;
-      const y = yOffset + lift;
+      const x = centerX + offsetX;
+      const z = centerZ + offsetZ;
+      const y = isSelected ? this.SELECTED_LIFT : 0;
 
       mesh.position.set(x, y, z);
-
-      // 3. Rotation
-      // Rotate Y to face the pivot point (normal to the circle)
-      // Rotate X for the "tilt" (looking down at cards)
-
-      // Reset rotation
       mesh.rotation.set(0, 0, 0);
+      // Rotate card to face center of table
+      mesh.rotation.y = -seatAngle + Math.PI;
 
-      // Apply Tilt (X)
-      mesh.rotation.x = THREE.MathUtils.degToRad(-tiltX);
-
-      // Apply Arc Rotation (Y)
-      // If the card is on the left (negative angle), it should rotate right (negative Y rot)
-      // to face the center/camera.
-      mesh.rotation.y = -angle;
-
-      // 4. Selection Scale
-      const scale = isSelected ? 1.05 : 1;
+      const scale = isSelected ? this.HOVER_SCALE : 1;
       mesh.scale.set(scale, scale, scale);
 
-      // Store Original Y for hover effects
       mesh.userData.originalY = y;
    }
-
-   // --- Mesh Creation ---
 
    private getCardTexture(card: Card): THREE.Texture {
       let path = "/cards/card_back.png";
@@ -298,16 +235,15 @@ export class CardThreeUI {
 
       const texture = this.textureLoader.load(path);
 
-      // PIXEL ART SETTINGS - Sharp, crisp rendering
-      texture.minFilter = THREE.NearestFilter; // Sharp pixels, no blur
-      texture.magFilter = THREE.NearestFilter; // Sharp pixels, no blur
-      texture.generateMipmaps = false; // Disable mipmaps for pixel art
-      texture.anisotropy = 1; // No anisotropic filtering
+      texture.minFilter = THREE.NearestFilter;
+      texture.magFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.anisotropy = 1;
 
       return texture;
    }
 
-   private createCardMesh(card: Card, index: number): CardMesh {
+   private createCardMesh(card: Card, index: number, seat: number): CardMesh {
       const geometry = new THREE.PlaneGeometry(
          this.CARD_WIDTH,
          this.CARD_HEIGHT
@@ -318,9 +254,9 @@ export class CardThreeUI {
          side: THREE.DoubleSide,
          roughness: 0.5,
          metalness: 0.1,
-         transparent: true, // Enable transparency
-         alphaTest: 0.5, // Discard pixels below 50% opacity
-         depthWrite: true, // Ensure proper depth sorting
+         transparent: true,
+         alphaTest: 0.5,
+         depthWrite: true,
       });
 
       const mesh = new THREE.Mesh(geometry, material) as CardMesh;
@@ -330,6 +266,7 @@ export class CardThreeUI {
       mesh.userData = {
          card,
          index,
+         seat,
          selected: false,
          originalY: 0,
       };
@@ -337,10 +274,7 @@ export class CardThreeUI {
       return mesh;
    }
 
-   // --- Public API ---
-
-   public renderHand(cards: Card[]): void {
-      // Clean up old meshes
+   public renderHand(game: Game): void {
       for (const mesh of this.cardMeshes) {
          this.scene.remove(mesh);
          mesh.geometry.dispose();
@@ -349,43 +283,40 @@ export class CardThreeUI {
       this.cardMeshes = [];
       this.selectedCards.clear();
 
-      // Create new meshes
-      for (const [index, card] of cards.entries()) {
-         const mesh = this.createCardMesh(card, index);
-         this.scene.add(mesh);
-         this.cardMeshes.push(mesh);
+      // Create new meshes for each player's hand
+      for (const [seat, player] of game.players.entries()) {
+         for (const [index, card] of player.hand.cards.entries()) {
+            const mesh = this.createCardMesh(card, index, seat);
+            this.scene.add(mesh);
+            this.cardMeshes.push(mesh);
+         }
       }
 
-      // Position them
-      for (const [index, mesh] of this.cardMeshes.entries())
-         this.updateCardPosition(mesh, index, cards.length, false);
-   }
-
-   public setCircularLayout(config: Partial<CircularLayoutConfig>): void {
-      this.circularLayout = { ...this.circularLayout, ...config };
-
-      // Update positions
-      for (const [index, mesh] of this.cardMeshes.entries()) {
-         this.updateCardPosition(
-            mesh,
-            index,
-            this.cardMeshes.length,
-            mesh.userData.selected
-         );
-      }
+      // Update all positions AFTER all meshes are created
+      // This ensures handSize is calculated correctly for all cards
+      for (const mesh of this.cardMeshes) this.updateCardPosition(mesh);
    }
 
    public getSelectedCards(): Card[] {
       return [...this.selectedCards]
-         .sort((a, b) => a - b)
-         .map((index) => this.cardMeshes[index].userData.card);
+         .toSorted((a, b) => {
+            const [seatA, indexA] = a.split("-").map(Number);
+            const [seatB, indexB] = b.split("-").map(Number);
+            return seatA === seatB ? indexA - indexB : seatA - seatB;
+         })
+         .map((key) => {
+            const [seat, index] = key.split("-").map(Number);
+            return this.cardMeshes.find(
+               (m) => m.userData.seat === seat && m.userData.index === index
+            )!.userData.card;
+         });
    }
 
    public clearSelection(): void {
       this.selectedCards.clear();
-      for (const [index, mesh] of this.cardMeshes.entries()) {
+      for (const mesh of this.cardMeshes) {
          mesh.userData.selected = false;
-         this.updateCardPosition(mesh, index, this.cardMeshes.length, false);
+         this.updateCardPosition(mesh);
       }
    }
 
@@ -405,19 +336,14 @@ export class CardThreeUI {
    }
 }
 
-// --- Bridge Functions ---
-
 let cardUI: CardThreeUI | undefined;
 
-export function initCardUI(
-   containerId: string = "#game-area",
-   layoutConfig?: Partial<CircularLayoutConfig>
-): void {
-   if (!cardUI) cardUI = new CardThreeUI(containerId, layoutConfig);
+export function initCardUI(containerId: string = "#game-area"): void {
+   if (!cardUI) cardUI = new CardThreeUI(containerId);
 }
 
-export function updateCardDisplay(cards: Card[]): void {
-   if (cardUI) cardUI.renderHand(cards);
+export function updateCardDisplay(): void {
+   if (cardUI) cardUI.renderHand(gs.room.game);
 }
 
 export function getSelectedCardsFromUI(): Card[] {
@@ -426,12 +352,6 @@ export function getSelectedCardsFromUI(): Card[] {
 
 export function clearCardSelection(): void {
    if (cardUI) cardUI.clearSelection();
-}
-
-export function updateCircularLayout(
-   config: Partial<CircularLayoutConfig>
-): void {
-   if (cardUI) cardUI.setCircularLayout(config);
 }
 
 export function disposeCardUI(): void {

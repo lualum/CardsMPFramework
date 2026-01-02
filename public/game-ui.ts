@@ -102,7 +102,7 @@ function handleBid(amount: number): void {
 }
 
 function isPlayersTurn(): boolean {
-   return gs.room.game.currentPlayerId === gs.player.id;
+   return gs.room.game.current.id === gs.player.id;
 }
 
 // MARK: Ping Indicator
@@ -246,7 +246,7 @@ export function updateUIPlayerList(): void {
          }
 
          const isCurrentPlayer = id === gs.player.id;
-         const isLandlord = gs.room.game.landlordId === id;
+         const isLandlord = gs.room.game.landlord?.id === id;
 
          playerDiv.innerHTML = `
             <span class="status-checkbox ${statusClass}">${statusIcon}</span>
@@ -267,10 +267,7 @@ export function updateUIGame(): void {
    const game = gs.room.game;
 
    updateUIPlayerList();
-
-   // Update current player's hand
-   const currentPlayer = game.players.get(gs.player.id);
-   if (currentPlayer?.hand) updateCardDisplay(currentPlayer.hand.cards);
+   updateCardDisplay();
 
    // Show/hide UI elements based on game phase
    const readyButton = document.querySelector(
@@ -319,7 +316,6 @@ export function updateUIGame(): void {
 
          break;
       }
-      // No default
    }
 
    updateGameInfoUI();
@@ -360,7 +356,7 @@ function updateLastPlayUI(): void {
    }
 
    const playerName =
-      gs.room.players.get(game.lastPlay.playerId)?.name || "Unknown";
+      gs.room.game.players[game.lastPlay.playerIndex].name || "Unknown";
 
    lastPlaySection.innerHTML = `
       <div class="last-play-header">Last Play by ${playerName}:</div>
@@ -372,13 +368,14 @@ function updateLastPlayUI(): void {
 
 function updateGameInfoUI(): void {
    const game = gs.room.game;
+   if (game.phase === "finished") return;
 
    const gameInfo = document.querySelector("#game-info") as HTMLDivElement;
 
    const currentPlayerName =
-      gs.room.players.get(game.currentPlayerId)?.name || "Unknown";
-   const landlordName = game.landlordId
-      ? gs.room.players.get(game.landlordId)?.name || "Unknown"
+      gs.room.players.get(game.current.id)?.name || "Unknown";
+   const landlordName = game.landlord?.id
+      ? gs.room.players.get(game.landlord.id)?.name || "Unknown"
       : "None";
 
    gameInfo.innerHTML = `

@@ -57,6 +57,9 @@ export function initGameSocket(): void {
       gs.room.status = RoomStatus.PLAYING;
       gs.room.game = Game.deserialize(raw);
 
+      for (const player of gs.room.game.players.values())
+         console.log(player.hand);
+
       startGameUI();
    });
 
