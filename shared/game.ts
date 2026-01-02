@@ -433,7 +433,7 @@ export class Hand {
             return card.color === "BLACK" ? 53 : 54;
          }
          case "Playing": {
-            return card.rank;
+            return card.rank === 2 ? 20 : card.rank;
          }
          case "Flipped": {
             return 55;
