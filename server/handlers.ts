@@ -1,8 +1,10 @@
+import type { GameSocket } from "server";
+import { emitRoomList, io, MENU_ROOM, rooms } from "server";
 import type { Server } from "socket.io";
+import type { Card } from "../shared/card";
+import { GamePhase } from "../shared/game";
 import { PlayerStatus } from "../shared/player";
-import { Game, GamePhase, Room, RoomStatus, type Card } from "../shared/room";
-import type { GameSocket } from "./server";
-import { emitRoomList, io, MENU_ROOM, rooms } from "./server";
+import { Room, RoomStatus } from "../shared/room";
 
 export function setupHandlers(socket: GameSocket): void {
    socket.on("ping", () => {
@@ -60,72 +62,62 @@ export function setupHandlers(socket: GameSocket): void {
       }
    });
 
-   socket.on("become-landlord", () => {
-      if (!socket.room || socket.room.status !== RoomStatus.PLAYING) return;
-      if (socket.room.game.phase !== GamePhase.BIDDING) return;
+   socket.on("bet-landlord", (bet: number) => {
+      if (
+         !socket.room ||
+         socket.room.status !== RoomStatus.PLAYING ||
+         socket.room.game.phase !== GamePhase.BIDDING
+      )
+         return;
 
-      socket.room.game.becomeLandlord(socket.player);
-
-      io.to(socket.room.code).emit(
-         "p-became-landlord",
-         socket.player.id,
-         socket.room.game.landlordCards
-      );
-   });
-
-   socket.on("play-cards", (cards: Card[]) => {
-      if (!socket.room || socket.room.status !== RoomStatus.PLAYING) return;
-
-      const players = [...socket.room.players.values()];
-      const play = Game.validatePlay(cards);
-
-      if (!play) {
-         socket.emit("error", "Invalid card combination");
+      if (socket.room.game.currentPlayerId !== socket.player.id) {
+         socket.emit("error", "Not your turn");
          return;
       }
 
-      const success = socket.room.game.playCards(socket.player, cards, players);
+      const result = socket.room.game.betLandlord(bet);
 
-      if (!success) {
+      if (result === undefined) {
+         socket.emit("error", "Invalid bet");
+         return;
+      }
+
+      io.to(socket.room.code).emit("p-bet-landlord", bet);
+
+      if (result) {
+         io.to(socket.room.code).emit(
+            "p-became-landlord",
+            socket.player.id,
+            socket.room.game.bottom
+         );
+         socket.room.game.becomeLandlord(socket.player.id);
+      }
+   });
+
+   socket.on("play-cards", (cards: Card[]) => {
+      if (
+         !socket.room ||
+         socket.room.status !== RoomStatus.PLAYING ||
+         socket.room.game.phase !== GamePhase.PLAYING
+      )
+         return;
+
+      const result = socket.room.game.playCards(cards);
+
+      if (result === undefined) {
          socket.emit("error", "Cannot play these cards");
          return;
       }
 
-      io.to(socket.room.code).emit(
-         "p-played-cards",
-         socket.player.id,
-         cards,
-         play
-      );
+      io.to(socket.room.code).emit("p-played-cards", cards);
 
-      // Check for winner
-      if (socket.player.hand.cards.length === 0) {
+      if (result) {
          const isLandlord = socket.player.id === socket.room.game.landlordId;
          const reason = isLandlord ? "Landlord victory!" : "Farmers victory!";
 
-         io.to(socket.room.code).emit("ended-room", socket.player.id, reason);
+         io.to(socket.room.code).emit("ended-room", reason);
          socket.room.endRoom();
       }
-   });
-
-   socket.on("pass", () => {
-      if (!socket.room || socket.room.status !== RoomStatus.PLAYING) return;
-
-      const players = [...socket.room.players.values()];
-      const success = socket.room.game.pass(socket.player, players);
-
-      if (!success) {
-         socket.emit("error", "Cannot pass now");
-         return;
-      }
-
-      io.to(socket.room.code).emit("p-passed", socket.player.id);
-   });
-
-   socket.on("send-chat", (message: string) => {
-      if (!socket.room) return;
-      socket.room.chat.push(socket.player.id, message.trim().slice(0, 200));
-      io.to(socket.room.code).emit("p-sent-chat", socket.player.id, message);
    });
 }
 
@@ -145,9 +137,7 @@ function joinRoom(socket: GameSocket, io: Server, code: string): void {
       return;
    }
 
-   // Leave the menu room when joining a game room
    socket.leave(MENU_ROOM);
-
    socket.join(code);
    socket.room = room;
 
@@ -179,7 +169,6 @@ function handlePlayerLeave(socket: GameSocket): void {
    if (room.status === RoomStatus.LOBBY) handleLobbyPlayerLeave(socket, room);
    else handleGamePlayerDisconnect(socket, room);
 
-   // Check if room should be deleted
    if (shouldDeleteRoom(room)) deleteRoom(room.code);
 }
 
@@ -215,7 +204,7 @@ function randomCode(): string {
       result = "";
       for (let index = 0; index < 4; index++)
          result += chars.charAt(Math.floor(Math.random() * chars.length));
-   } while (rooms.has(result)); // Ensure unique code
+   } while (rooms.has(result));
 
    return result;
 }

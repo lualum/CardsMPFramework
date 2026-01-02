@@ -62,9 +62,36 @@
                </div>
             </div>
          </div>
-         <button id="ready-btn">Ready</button>
-         <button id="resign-btn">Resign</button>
+
+         <!-- Game Control Buttons Section -->
+         <div id="game-controls">
+            <button id="ready-btn">Ready</button>
+            <button id="resign-btn">Resign</button>
+
+            <!-- Bidding Section -->
+            <div id="bidding-section" style="display: none;">
+               <div id="bidding-info">Current bid: 0</div>
+               <button id="bid-1-btn">Bid 1</button>
+               <button id="bid-2-btn">Bid 2</button>
+               <button id="bid-3-btn">Bid 3</button>
+               <button id="bid-pass-btn">Pass</button>
+            </div>
+
+            <!-- Playing Phase Buttons -->
+            <button id="play-cards-btn" style="display: none;">Play Cards</button>
+            <button id="pass-btn" style="display: none;">Pass</button>
+         </div>
+
+         <!-- Game Info Section -->
+         <div id="game-info"></div>
+
+         <!-- Last Play Section -->
+         <div id="last-play" style="display: none;"></div>
+
+         <!-- Player List -->
          <div id="player-list"></div>
+
+         <!-- Chat Section -->
          <div id="chat-section">
             <div id="chat-messages"></div>
             <div id="chat-input-container">
@@ -72,16 +99,7 @@
             </div>
          </div>
       </div>
-      <div id="game-area-wrapper">
-         <div class="scroll-controls">
-            <button class="scroll-btn" id="scrollLeft">←</button>
-            <span class="scroll-indicator">Board <span id="boardRange">1</span> of
-               <span id="totalBoards">1</span></span>
-            <button id="grid-toggle-btn" class="control-btn">Grid View</button>
-            <button class="scroll-btn" id="scrollRight">→</button>
-         </div>
-         <div id="game-area" class="hide-scrollbar"></div>
-      </div>
+      <div id="game-area"></div>
    </div>
    <!-- NAME MODAL -->
    <div id="name-modal" class="modal hidden">
@@ -100,6 +118,13 @@
    </div>
    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
    <script type="module" src="/dist/client.js"></script>
+   <script type="importmap">
+   {
+     "imports": {
+       "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+     }
+   }
+   </script>
 </body>
 
 </html>

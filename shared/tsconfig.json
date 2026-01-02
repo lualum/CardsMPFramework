@@ -6,7 +6,7 @@
       "module": "ES2022",
       "moduleResolution": "bundler",
       "lib": [
-         "ES2022"
+         "ES2024"
       ],
       "composite": true
    },

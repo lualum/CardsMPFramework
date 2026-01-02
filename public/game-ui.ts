@@ -1,9 +1,16 @@
+// game-ui.ts
+import type { Card } from "../shared/card";
 import type { ChatMessage } from "../shared/chat";
 import { PlayerStatus } from "../shared/player";
+import {
+   clearCardSelection,
+   disposeCardUI,
+   getSelectedCardsFromUI,
+   initCardUI,
+   updateCardDisplay,
+} from "./card-three-ui";
 import { leaveRoom } from "./menu-ui";
 import { gs } from "./session";
-
-let gridMode = false;
 
 let pingIntervalID: NodeJS.Timeout;
 let pingStartTime: number = 0;
@@ -12,11 +19,7 @@ export function initGameControls(): void {
    const leaveGameButton = document.querySelector("#leave-game-btn");
    leaveGameButton?.addEventListener("click", () => {
       leaveRoom();
-   });
-
-   const gridToggleButton = document.querySelector("#grid-toggle-btn");
-   gridToggleButton?.addEventListener("click", () => {
-      toggleGridMode();
+      disposeCardUI();
    });
 
    const chatInput = document.querySelector("#chat-input");
@@ -30,11 +33,28 @@ export function initGameControls(): void {
       event.stopPropagation();
    });
 
-   // Add resign button event listener
-   const resignButton = document.querySelector("#resign-btn");
-   resignButton?.addEventListener("click", () => {
-      handleResign();
+   // Add play cards button event listener
+   const playCardsButton = document.querySelector("#play-cards-btn");
+   playCardsButton?.addEventListener("click", () => {
+      handlePlayCards();
    });
+
+   // Add pass button event listener
+   const passButton = document.querySelector("#pass-btn");
+   passButton?.addEventListener("click", () => {
+      handlePass();
+   });
+
+   // Add bid buttons
+   const bid1Button = document.querySelector("#bid-1-btn");
+   const bid2Button = document.querySelector("#bid-2-btn");
+   const bid3Button = document.querySelector("#bid-3-btn");
+   const bidPassButton = document.querySelector("#bid-pass-btn");
+
+   bid1Button?.addEventListener("click", () => handleBid(1));
+   bid2Button?.addEventListener("click", () => handleBid(2));
+   bid3Button?.addEventListener("click", () => handleBid(3));
+   bidPassButton?.addEventListener("click", () => handleBid(0));
 
    document.addEventListener("keydown", (event: Event) => {
       const keyEvent = event as KeyboardEvent;
@@ -43,49 +63,46 @@ export function initGameControls(): void {
       const target = keyEvent.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-      if (keyEvent.key === "x") {
-         toggleVisualFlipped();
-         updateUIAllGame();
+      // Space to play selected cards
+      if (keyEvent.key === " " || keyEvent.key === "Enter") {
+         keyEvent.preventDefault();
+         handlePlayCards();
       }
 
-      if (keyEvent.key === "g" || keyEvent.key === "G") toggleGridMode();
-
-      // Navigate boards with arrow keys or A/D
-      if (
-         keyEvent.key === "ArrowLeft" ||
-         keyEvent.key === "a" ||
-         keyEvent.key === "A"
-      ) {
-         keyEvent.preventDefault(); // Override default HTML behavior
-         navigateBoards(-1);
-      } else if (
-         keyEvent.key === "ArrowRight" ||
-         keyEvent.key === "d" ||
-         keyEvent.key === "D"
-      ) {
-         keyEvent.preventDefault(); // Override default HTML behavior
-         navigateBoards(1);
+      // P to pass
+      if (keyEvent.key === "p" || keyEvent.key === "P") {
+         keyEvent.preventDefault();
+         handlePass();
       }
    });
 }
 
-// MARK: Resign Functionality
+// MARK: Game Actions
 
-function handleResign(): void {
-   if (confirm("Are you sure you want to resign? This will end the game."))
-      gs.socket.emit("resign-room");
+function handlePlayCards(): void {
+   const selectedCards = getSelectedCardsFromUI();
+
+   if (selectedCards.length === 0) {
+      showNotification("Please select cards to play");
+      return;
+   }
+
+   // Emit to server
+   gs.socket.emit("play-cards", selectedCards);
+   clearCardSelection();
 }
 
-function isPlayerInGame(): boolean {
-   // Check if current player is playing in any match
-   for (const match of gs.room.game.matches) {
-      const whitePlayer = match.getPlayer(Color.WHITE);
-      const blackPlayer = match.getPlayer(Color.BLACK);
+function handlePass(): void {
+   gs.socket.emit("play-cards", []);
+   clearCardSelection();
+}
 
-      if (whitePlayer?.id === gs.player.id || blackPlayer?.id === gs.player.id)
-         return true;
-   }
-   return false;
+function handleBid(amount: number): void {
+   gs.socket.emit("bid", amount);
+}
+
+function isPlayersTurn(): boolean {
+   return gs.room.game.currentPlayerId === gs.player.id;
 }
 
 // MARK: Ping Indicator
@@ -117,7 +134,6 @@ function updatePingDisplay(ping: number): void {
    const bars = document.querySelectorAll(".ping-bar");
    for (const [index, bar] of bars.entries()) {
       const barElement = bar as HTMLElement;
-      // We check from the bottom up (index < activeBars)
       if (index < activeBars) {
          barElement.style.backgroundColor = color;
          barElement.style.opacity = "1";
@@ -145,7 +161,7 @@ export function stopPingUpdates(): void {
    clearInterval(pingIntervalID);
 }
 
-// MARK: Sidebar UI
+// MARK: Room UI
 
 export function showRoomElements(): void {
    const gameScreen = document.querySelector("#game") as HTMLDivElement;
@@ -159,42 +175,12 @@ export function showRoomElements(): void {
    ) as HTMLSpanElement;
    gameRoomCode.textContent = gs.room.code || "";
 
-   const boardsArea = document.querySelector("#game-area") as HTMLDivElement;
-   for (const container of boardsArea.querySelectorAll(".game-container"))
-      container.remove();
+   // Initialize Three.js card UI
+   initCardUI();
 
-   // Reset grid mode when creating room elements
-   if (gridMode) {
-      gridMode = false;
-      const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-      gameArea.classList.remove("grid-mode");
-      window.removeEventListener("resize", updateGridLayout);
-      resetToFlexLayout();
-   }
-
-   for (let index = 0; index < gs.room.game.matches.length; index++)
-      createMatchElements(index);
-
-   const totalBoardsSpan = document.querySelector("#totalBoards");
-   if (totalBoardsSpan)
-      totalBoardsSpan.textContent = gs.room.game.matches.length.toString();
-
-   initScrollControls();
    initPingIndicator();
 
-   // Reset button icon to scroll view
-   const gridToggleButton = document.querySelector(
-      "#grid-toggle-btn"
-   ) as HTMLButtonElement;
-
-   gridToggleButton.innerHTML = `
-         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="18"></rect>
-            <rect x="14" y="3" width="7" height="18"></rect>
-         </svg>
-      `;
-
-   // Reset buttons to initial state (show ready, hide resign)
+   // Reset buttons to initial state
    resetGameButtons();
 }
 
@@ -216,12 +202,18 @@ function resetGameButtons(): void {
    const readyButton = document.querySelector(
       "#ready-btn"
    ) as HTMLButtonElement;
-   const resignButton = document.querySelector(
-      "#resign-btn"
+   const playCardsButton = document.querySelector(
+      "#play-cards-btn"
    ) as HTMLButtonElement;
+   const passButton = document.querySelector("#pass-btn") as HTMLButtonElement;
+   const biddingSection = document.querySelector(
+      "#bidding-section"
+   ) as HTMLDivElement;
 
    readyButton.style.display = "block";
-   resignButton.style.display = "none";
+   playCardsButton.style.display = "none";
+   passButton.style.display = "none";
+   biddingSection.style.display = "none";
 }
 
 export function updateUIPlayerList(): void {
@@ -254,17 +246,159 @@ export function updateUIPlayerList(): void {
          }
 
          const isCurrentPlayer = id === gs.player.id;
+         const isLandlord = gs.room.game.landlordId === id;
 
          playerDiv.innerHTML = `
             <span class="status-checkbox ${statusClass}">${statusIcon}</span>
             <div class="player-name" style="${
                isCurrentPlayer ? "font-weight: bold;" : ""
-            }">${player.name}</div>
+            }">${player.name}${isLandlord ? " 👑" : ""}</div>
+            <div class="card-count">${player.hand.cards.length || 0}</div>
          `;
 
          playerList.append(playerDiv);
       }
    }
+}
+
+// MARK: Game State UI
+
+export function updateUIGame(): void {
+   const game = gs.room.game;
+
+   updateUIPlayerList();
+
+   // Update current player's hand
+   const currentPlayer = game.players.get(gs.player.id);
+   if (currentPlayer?.hand) updateCardDisplay(currentPlayer.hand.cards);
+
+   // Show/hide UI elements based on game phase
+   const readyButton = document.querySelector(
+      "#ready-btn"
+   ) as HTMLButtonElement;
+   const playCardsButton = document.querySelector(
+      "#play-cards-btn"
+   ) as HTMLButtonElement;
+   const passButton = document.querySelector("#pass-btn") as HTMLButtonElement;
+   const biddingSection = document.querySelector(
+      "#bidding-section"
+   ) as HTMLDivElement;
+
+   switch (game.phase) {
+      case "bidding": {
+         readyButton.style.display = "none";
+         playCardsButton.style.display = "none";
+         passButton.style.display = "none";
+
+         biddingSection.style.display = "block";
+         updateBiddingUI();
+
+         break;
+      }
+      case "playing": {
+         readyButton.style.display = "none";
+         biddingSection.style.display = "none";
+
+         const isMyTurn = isPlayersTurn();
+
+         playCardsButton.style.display = isMyTurn ? "block" : "none";
+         playCardsButton.disabled = !isMyTurn;
+
+         passButton.style.display = isMyTurn ? "block" : "none";
+         passButton.disabled = !isMyTurn;
+
+         updateLastPlayUI();
+
+         break;
+      }
+      case "finished": {
+         readyButton.style.display = "block";
+         playCardsButton.style.display = "none";
+         passButton.style.display = "none";
+         biddingSection.style.display = "none";
+
+         break;
+      }
+      // No default
+   }
+
+   updateGameInfoUI();
+}
+
+function updateBiddingUI(): void {
+   const game = gs.room.game;
+
+   const isMyTurn = isPlayersTurn();
+   const currentBet = game.bet;
+
+   const bid1Button = document.querySelector("#bid-1-btn") as HTMLButtonElement;
+   const bid2Button = document.querySelector("#bid-2-btn") as HTMLButtonElement;
+   const bid3Button = document.querySelector("#bid-3-btn") as HTMLButtonElement;
+   const bidPassButton = document.querySelector(
+      "#bid-pass-btn"
+   ) as HTMLButtonElement;
+
+   bid1Button.disabled = !isMyTurn || currentBet >= 1;
+   bid2Button.disabled = !isMyTurn || currentBet >= 2;
+   bid3Button.disabled = !isMyTurn || currentBet >= 3;
+   bidPassButton.disabled = !isMyTurn;
+
+   const biddingInfo = document.querySelector("#bidding-info");
+   if (biddingInfo) biddingInfo.textContent = `Current bid: ${currentBet}`;
+}
+
+function updateLastPlayUI(): void {
+   const game = gs.room.game;
+
+   const lastPlaySection = document.querySelector(
+      "#last-play"
+   ) as HTMLDivElement;
+
+   if (!game.lastPlay) {
+      lastPlaySection.style.display = "none";
+      return;
+   }
+
+   const playerName =
+      gs.room.players.get(game.lastPlay.playerId)?.name || "Unknown";
+
+   lastPlaySection.innerHTML = `
+      <div class="last-play-header">Last Play by ${playerName}:</div>
+      <div class="last-play-cards">${formatCards(game.lastPlay.cards)}</div>
+      <div class="last-play-type">${formatPlayType(game.lastPlay.type)}</div>
+   `;
+   lastPlaySection.style.display = "block";
+}
+
+function updateGameInfoUI(): void {
+   const game = gs.room.game;
+
+   const gameInfo = document.querySelector("#game-info") as HTMLDivElement;
+
+   const currentPlayerName =
+      gs.room.players.get(game.currentPlayerId)?.name || "Unknown";
+   const landlordName = game.landlordId
+      ? gs.room.players.get(game.landlordId)?.name || "Unknown"
+      : "None";
+
+   gameInfo.innerHTML = `
+      <div class="info-row">
+         <span class="info-label">Phase:</span>
+         <span class="info-value">${game.phase}</span>
+      </div>
+      <div class="info-row">
+         <span class="info-label">Current Turn:</span>
+         <span class="info-value">${currentPlayerName}</span>
+      </div>
+      <div class="info-row">
+         <span class="info-label">Landlord:</span>
+         <span class="info-value">${landlordName}</span>
+      </div>
+      <div class="info-row">
+         <span class="info-label">Bet:</span>
+         <span class="info-value">${game.bet}</span>
+      </div>
+   `;
 }
 
 // MARK: Chat UI
@@ -312,243 +446,88 @@ export function sendChatMessage(): void {
    }
 }
 
-// MARK: Scrolling UI
+// MARK: Notification System
 
-function getBoardAreaDimensions(): { board: number; gap: number } {
-   const gameArea = document.querySelector("#game-area") as HTMLElement;
-   const boardArea = document.querySelector(".match-container") as HTMLElement;
-   return {
-      board: boardArea.clientWidth,
-      gap: Number.parseFloat(getComputedStyle(gameArea).gap) || 0,
-   };
-}
+function showNotification(message: string, duration: number = 3000): void {
+   const notification = document.createElement("div");
+   notification.className = "notification";
+   notification.textContent = message;
 
-function getTotalBoards(): number {
-   return gs.room.game.matches.length || 1;
-}
+   document.body.append(notification);
 
-function scrollBoards(
-   gameArea: HTMLDivElement,
-   direction: number,
-   updateScrollButtons: () => void
-): void {
-   const { board, gap } = getBoardAreaDimensions();
-   gameArea.scrollBy({
-      left: direction * (board + gap),
-      behavior: "smooth",
-   });
-   setTimeout(updateScrollButtons, 300);
-}
-
-function updateScrollButtons(
-   gameArea: HTMLDivElement,
-   leftButton: HTMLButtonElement,
-   rightButton: HTMLButtonElement
-): void {
-   const scrollLeft = gameArea.scrollLeft;
-   const maxScroll = gameArea.scrollWidth - gameArea.clientWidth;
-   leftButton.disabled = scrollLeft <= 1;
-   rightButton.disabled = scrollLeft >= maxScroll - 1;
-
-   const totalBoards = getTotalBoards();
-   const { board, gap } = getBoardAreaDimensions();
-   const leftBoard = Math.ceil((scrollLeft - gap) / (board + gap)) + 1;
-   const rightBoard =
-      totalBoards - Math.ceil((maxScroll - scrollLeft - gap) / (board + gap));
-
-   const currentBoardSpan = document.querySelector("#boardRange");
-   const totalBoardsSpan = document.querySelector("#totalBoards");
-
-   if (currentBoardSpan) {
-      if (leftBoard > rightBoard) currentBoardSpan.textContent = "_";
-      else if (leftBoard === rightBoard)
-         currentBoardSpan.textContent = `${leftBoard}`;
-      else currentBoardSpan.textContent = `${leftBoard}-${rightBoard}`;
-   }
-
-   if (totalBoardsSpan) totalBoardsSpan.textContent = totalBoards.toString();
-}
-
-// Navigate boards with keyboard
-function navigateBoards(direction: number): void {
-   const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-   const leftButton = document.querySelector(
-      "#scrollLeft"
-   ) as HTMLButtonElement;
-   const rightButton = document.querySelector(
-      "#scrollRight"
-   ) as HTMLButtonElement;
-
-   const updateScrollButtonsBound = () =>
-      updateScrollButtons(gameArea, leftButton, rightButton);
-
-   scrollBoards(gameArea, direction, updateScrollButtonsBound);
-}
-
-export function initScrollControls(): void {
-   const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-   const leftButton = document.querySelector(
-      "#scrollLeft"
-   ) as HTMLButtonElement;
-   const rightButton = document.querySelector(
-      "#scrollRight"
-   ) as HTMLButtonElement;
-
-   const updateScrollButtonsBound = () =>
-      updateScrollButtons(gameArea, leftButton, rightButton);
-
-   leftButton.addEventListener("click", () =>
-      scrollBoards(gameArea, -1, updateScrollButtonsBound)
-   );
-   rightButton.addEventListener("click", () =>
-      scrollBoards(gameArea, 1, updateScrollButtonsBound)
-   );
-   gameArea.addEventListener("scroll", updateScrollButtonsBound);
-
-   updateScrollButtonsBound();
-}
-
-// MARK: Grid Mode UI
-
-export function toggleGridMode(): void {
-   gridMode = !gridMode;
-   const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-   const gridToggleButton = document.querySelector(
-      "#grid-toggle-btn"
-   ) as HTMLButtonElement;
-
-   if (gridMode) {
-      gameArea.classList.add("grid-mode");
-      gridToggleButton.innerHTML = `
-         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7"></rect>
-            <rect x="14" y="3" width="7" height="7"></rect>
-            <rect x="3" y="14" width="7" height="7"></rect>
-            <rect x="14" y="14" width="7" height="7"></rect>
-         </svg>
-      `;
-
-      updateGridLayout();
-      window.addEventListener("resize", updateGridLayout);
-   } else {
-      gameArea.classList.remove("grid-mode");
-      gridToggleButton.innerHTML = `
-         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="18"></rect>
-            <rect x="14" y="3" width="7" height="18"></rect>
-         </svg>
-      `;
-
-      window.removeEventListener("resize", updateGridLayout);
-      resetToFlexLayout();
-   }
-}
-
-function updateGridLayout(): void {
-   if (!gridMode) return;
-
-   const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-   const matches = gameArea.querySelectorAll(".match-container");
-   const boardCount = matches.length;
-   if (boardCount === 0) return;
-
-   // Margin/Padding offset
-   const winW = gameArea.clientWidth - 40;
-   const winH = gameArea.clientHeight - 40;
-
-   // Match Aspect Ratio: Width (8 squares) / Height (10 squares) = 0.8
-   const ratio = 0.8;
-
-   let bestW = 0;
-   let bestCols = 1;
-
-   for (let cols = 1; cols <= boardCount; cols++) {
-      const rows = Math.ceil(boardCount / cols);
-      let w = winW / cols;
-      // Check if height exceeds available space
-      if (w * (1 / ratio) * rows > winH) w = (winH / rows) * ratio;
-
-      if (w > bestW) {
-         bestW = w;
-         bestCols = cols;
-      }
-   }
-
-   gameArea.style.gridTemplateColumns = `repeat(${bestCols}, auto)`;
-
-   for (const match of matches) {
-      const m = match as HTMLElement;
-      // Apply the calculated width, height follows aspect ratio
-      m.style.width = `${bestW - 10}px`;
-      m.style.height = `${(bestW - 10) * (1 / ratio)}px`;
-      m.style.setProperty("--square-size", `${(bestW - 10) / 8}px`);
-   }
-}
-
-function resetToFlexLayout(): void {
-   const gameArea = document.querySelector("#game-area") as HTMLDivElement;
-   const matches = gameArea.querySelectorAll(".match-container");
-
-   gameArea.style.gridTemplateColumns = "";
-   for (const match of matches) {
-      const m = match as HTMLElement;
-      m.style.width = "";
-      m.style.height = "";
-      m.style.removeProperty("--square-size");
-   }
+   setTimeout(() => {
+      notification.classList.add("fade-out");
+      setTimeout(() => {
+         notification.remove();
+      }, 300);
+   }, duration);
 }
 
 // MARK: Start/End Game UI
 
 export function startGameUI(): void {
-   const readyButton = document.querySelector(
-      "#ready-btn"
-   ) as HTMLButtonElement;
-   const resignButton = document.querySelector(
-      "#resign-btn"
-   ) as HTMLButtonElement;
-
-   // Show resign button only if player is in the game
-   if (isPlayerInGame()) {
-      readyButton.style.display = "none";
-      resignButton.style.display = "block";
-   } else {
-      readyButton.style.display = "none";
-      resignButton.style.display = "none";
-   }
-
-   // Put current player on bottom
-   let topBottomDelta = 0; // # of this player on top - # on bottom
-   for (const match of gs.room.game.matches) {
-      const playerIsTop =
-         match.getPlayer(match.flipped ? Color.WHITE : Color.BLACK)?.id ===
-         gs.player.id;
-      const playerIsBottom =
-         match.getPlayer(match.flipped ? Color.BLACK : Color.WHITE)?.id ===
-         gs.player.id;
-
-      topBottomDelta += (playerIsTop ? 1 : 0) - (playerIsBottom ? 1 : 0);
-   }
-
-   // If more boards have this player on top than bottom, flip all boards
-   setVisualFlipped(topBottomDelta > 0);
-   updateUIAllGame();
-   initScrollControls();
+   updateUIGame();
+   showNotification("Game started!");
 }
 
 export function endGameUI(): void {
    const readyButton = document.querySelector(
       "#ready-btn"
    ) as HTMLButtonElement;
-   const resignButton = document.querySelector(
-      "#resign-btn"
+   const playCardsButton = document.querySelector(
+      "#play-cards-btn"
    ) as HTMLButtonElement;
+   const passButton = document.querySelector("#pass-btn") as HTMLButtonElement;
+   const biddingSection = document.querySelector(
+      "#bidding-section"
+   ) as HTMLDivElement;
 
    readyButton.style.display = "block";
-   resignButton.style.display = "none";
+   playCardsButton.style.display = "none";
+   passButton.style.display = "none";
+   biddingSection.style.display = "none";
 
-   updateUIAllGame();
    updateUIPlayerList();
+   clearCardSelection();
+}
+
+// MARK: Helper Functions
+
+function formatCards(cards: Card[]): string {
+   return cards
+      .map((card) => {
+         if (card.type === "Joker") return card.color === "BLACK" ? "🃏" : "🃟";
+
+         if (card.type === "Playing") {
+            const suitSymbols = { h: "♥", d: "♦", c: "♣", s: "♠" };
+            const rankSymbols: Record<number, string> = {
+               1: "A",
+               11: "J",
+               12: "Q",
+               13: "K",
+            };
+            const rank = rankSymbols[card.rank] || card.rank.toString();
+            return `${rank}${suitSymbols[card.suit]}`;
+         }
+         return "?";
+      })
+      .join(" ");
+}
+
+function formatPlayType(type: string): string {
+   const typeNames: Record<string, string> = {
+      solo: "Single",
+      pair: "Pair",
+      triple: "Triple",
+      triple_with_single: "Triple + Single",
+      triple_with_pair: "Triple + Pair",
+      straight: "Straight",
+      pair_straight: "Pair Straight",
+      triple_straight: "Airplane",
+      bomb: "Bomb 💣",
+      rocket: "Rocket 🚀",
+   };
+   return typeNames[type] || type;
 }
 
 function escapeHtml(text: string): string {

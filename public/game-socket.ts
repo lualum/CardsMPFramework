@@ -1,18 +1,14 @@
+import type { Card } from "../shared/card";
+import type { SerializedGame } from "../shared/game";
+import { Game } from "../shared/game";
 import { Player, type PlayerStatus } from "../shared/player";
-import {
-   Game,
-   Room,
-   RoomStatus,
-   type Card,
-   type Play,
-   type SerializedGame,
-   type SerializedRoom,
-} from "../shared/room";
+import { Room, RoomStatus, type SerializedRoom } from "../shared/room";
 import {
    endGameUI,
    showRoomElements,
    startGameUI,
    updateUIAllChat,
+   updateUIGame,
    updateUIPlayerList,
    updateUIPushChat,
 } from "./game-ui";
@@ -31,7 +27,7 @@ export function initGameSocket(): void {
       showRoomElements();
       updateUIPlayerList();
       updateUIAllChat();
-      updateUIGameState();
+      updateUIGame();
 
       if (room.status === RoomStatus.PLAYING) startGameUI();
       else endGameUI();
@@ -61,113 +57,39 @@ export function initGameSocket(): void {
       gs.room.status = RoomStatus.PLAYING;
       gs.room.game = Game.deserialize(raw);
 
-      // Update player hands from the game state
-      const players = [...gs.room.players.values()];
-      for (const player of players) player.hand.sort();
-
       startGameUI();
-      updateUIGameState();
    });
 
-   gs.socket.on(
-      "p-became-landlord",
-      (playerId: string, landlordCards: Card[]) => {
-         const player = gs.room.getPlayer(playerId);
-         if (player) {
-            player.hand.cards.push(...landlordCards);
-            player.hand.sort();
-         }
-         gs.room.game.landlordId = playerId;
-         gs.room.game.currentPlayerId = playerId;
-         updateUIGameState();
-         updateUIPushChat({
-            id: "server",
-            message: `${player?.name} became the landlord!`,
-         });
-      }
-   );
+   gs.socket.on("p-bet-landlord", (bet: number) => {
+      gs.room.game.betLandlord(bet);
+      updateUIGame();
+   });
 
-   gs.socket.on(
-      "p-played-cards",
-      (playerId: string, cards: Card[], play: Play) => {
-         const player = gs.room.getPlayer(playerId);
-         if (player) player.hand.remove(cards);
-
-         gs.room.game.lastPlay = play;
-         gs.room.game.passCount = 0;
-
-         // Move to next player
-         const players = [...gs.room.players.values()];
-         const currentIndex = players.findIndex((p) => p.id === playerId);
-         const nextIndex = (currentIndex + 1) % players.length;
-         gs.room.game.currentPlayerId = players[nextIndex].id;
-
-         updateUIGameState();
-         updateUIPushChat({
-            id: playerId,
-            message: `played ${cards.length} card(s) - ${play.type}`,
-         });
-      }
-   );
-
-   gs.socket.on("p-passed", (playerId: string) => {
-      gs.room.game.passCount++;
-
-      // Check if round resets (2 passes)
-      if (gs.room.game.passCount >= 2) {
-         gs.room.game.lastPlay = undefined;
-         gs.room.game.passCount = 0;
-         updateUIPushChat({
-            id: "server",
-            message: "New round - play any valid combination!",
-         });
-      }
-
-      // Move to next player
-      const players = [...gs.room.players.values()];
-      const currentIndex = players.findIndex((p) => p.id === playerId);
-      const nextIndex = (currentIndex + 1) % players.length;
-      gs.room.game.currentPlayerId = players[nextIndex].id;
-
-      updateUIGameState();
+   gs.socket.on("p-became-landlord", (playerId: string, bottom: Card[]) => {
+      gs.room.game.becomeLandlord(playerId, bottom);
       updateUIPushChat({
-         id: playerId,
-         message: "passed",
+         id: "server",
+         message: `${gs.room.players.get(playerId)?.name} is the landlord!`,
       });
    });
 
-   gs.socket.on("ended-room", (winnerId: string, reason: string) => {
-      const winner = gs.room.getPlayer(winnerId);
+   gs.socket.on("p-played-cards", (cards: Card[]) => {
+      gs.room.game.playCards(cards, false);
+
+      updateUIGame();
+   });
+
+   gs.socket.on("ended-room", (reason: string) => {
       gs.room.endRoom();
       endGameUI();
       updateUIPushChat({
          id: "server",
-         message: `${winner?.name} won! ${reason}`,
+         message: reason,
       });
    });
 
    gs.socket.on("p-sent-chat", (id: string, message: string) => {
       gs.room.chat.push(id, message);
       updateUIPushChat({ id, message });
-   });
-}
-
-function updateUIGameState(): void {
-   // Update all UI elements related to game state
-   // This would include:
-   // - Current player indicator
-   // - Player hands (only show own hand fully, others show card count)
-   // - Last played cards
-   // - Landlord indicator
-   // - Pass count
-   // - Game phase (bidding vs playing)
-
-   // TODO: Implement based on your UI structure
-   console.log("Game state updated:", {
-      phase: gs.room.game.phase,
-      currentPlayer: gs.room.game.currentPlayerId,
-      landlord: gs.room.game.landlordId,
-      lastPlay: gs.room.game.lastPlay,
-      passCount: gs.room.game.passCount,
    });
 }

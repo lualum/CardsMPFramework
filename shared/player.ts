@@ -1,11 +1,12 @@
-import type { Card } from "./room";
-import { Hand } from "./room";
+import type { Card } from "./card";
+import { Hand } from "./game";
 
 export interface SerializedPlayer {
    id: string;
    name: string;
    status: PlayerStatus;
    hand: Card[];
+   score: number;
 }
 
 export enum PlayerStatus {
@@ -18,7 +19,8 @@ export class Player {
    id: string;
    name: string;
    status: PlayerStatus;
-   hand: Hand;
+   score: number = 0;
+   hand: Hand = new Hand([]);
 
    constructor(
       id: string,
@@ -28,7 +30,6 @@ export class Player {
       this.id = id;
       this.name = name;
       this.status = status;
-      this.hand = new Hand([]);
    }
 
    serialize(): SerializedPlayer {
@@ -37,12 +38,14 @@ export class Player {
          name: this.name,
          status: this.status,
          hand: this.hand.cards,
+         score: this.score,
       };
    }
 
    static deserialize(data: SerializedPlayer): Player {
       const player = new Player(data.id, data.name, data.status);
       player.hand = new Hand(data.hand);
+      player.score = data.score;
       return player;
    }
 }
