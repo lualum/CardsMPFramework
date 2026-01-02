@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import express from "express";
 import { setupHandlers } from "handlers";
 import { randomBytes } from "node:crypto";
@@ -7,6 +8,7 @@ import { Server, Socket } from "socket.io";
 import { Player } from "../shared/player";
 import type { Room } from "../shared/room";
 
+dotenv.config();
 const app = express();
 const server = http.createServer(app);
 export const io = new Server(server);

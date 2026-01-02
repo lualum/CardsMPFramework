@@ -3,7 +3,7 @@ import { emitRoomList, io, MENU_ROOM, rooms } from "server";
 import type { Server } from "socket.io";
 import type { Card } from "../shared/card";
 import { GamePhase } from "../shared/game";
-import { PlayerStatus } from "../shared/player";
+import { Player, PlayerStatus } from "../shared/player";
 import { Room, RoomStatus } from "../shared/room";
 
 export function setupHandlers(socket: GameSocket): void {
@@ -23,6 +23,7 @@ export function setupHandlers(socket: GameSocket): void {
       }
 
       joinRoom(socket, io, code);
+
       emitRoomList();
    });
 
@@ -126,6 +127,10 @@ function createRoom(roomCode?: string): string | undefined {
    const code = roomCode || randomCode();
    const room = new Room(code);
    rooms.set(code, room);
+
+   if (process.env.dev)
+      room.addPlayer(new Player("dev", "Dev", PlayerStatus.READY));
+
    return code;
 }
 
