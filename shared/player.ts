@@ -32,12 +32,16 @@ export class Player {
       this.status = status;
    }
 
-   serialize(): SerializedPlayer {
+   serialize(hidden = false): SerializedPlayer {
       return {
          id: this.id,
          name: this.name,
          status: this.status,
-         hand: this.hand.cards,
+         hand: hidden
+            ? (Array.from({ length: this.hand.cards.length }).fill({
+                 type: "Flipped",
+              }) as Card[])
+            : this.hand.cards,
          score: this.score,
       };
    }

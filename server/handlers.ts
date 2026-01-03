@@ -56,9 +56,12 @@ export function setupHandlers(socket: GameSocket): void {
       );
 
       if (socket.room.tryStartRoom()) {
+         const toIndex = socket.room.game.players.findIndex(
+            (p) => p.id === socket.player.id
+         );
          io.to(socket.room.code).emit(
             "started-room",
-            socket.room.game.serialize()
+            socket.room.game.serialize(toIndex === -1 ? undefined : toIndex)
          );
       }
    });
@@ -128,8 +131,10 @@ function createRoom(roomCode?: string): string | undefined {
    const room = new Room(code);
    rooms.set(code, room);
 
-   if (process.env.dev)
-      room.addPlayer(new Player("dev", "Dev", PlayerStatus.READY));
+   if (process.env.dev) {
+      room.addPlayer(new Player("dev1", "DevA", PlayerStatus.READY));
+      room.addPlayer(new Player("dev2", "DevB", PlayerStatus.READY));
+   }
 
    return code;
 }

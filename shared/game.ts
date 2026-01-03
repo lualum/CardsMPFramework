@@ -1,12 +1,13 @@
 import type { Card, Rank, Suit } from "./card";
-import type { Player } from "./player";
+import type { SerializedPlayer } from "./player";
+import { Player } from "./player";
 
 export interface SerializedGame {
    bottom: Card[];
    currentIndex: number;
    lastPlay: Play | undefined;
    phase: GamePhase;
-   players: Player[];
+   players: SerializedPlayer[];
    bet: number;
    landlordIndex: number | undefined;
 }
@@ -22,13 +23,28 @@ export class Game {
 
    constructor() {}
 
-   serialize(): SerializedGame {
+   serialize(toIndex?: number): SerializedGame {
+      if (toIndex === undefined) {
+         return {
+            bottom: this.bottom,
+            currentIndex: this.currentIndex,
+            lastPlay: this.lastPlay,
+            phase: this.phase,
+            players: this.players.map((p) => p.serialize(false)),
+            bet: this.bet,
+            landlordIndex: this.landlordIndex,
+         };
+      }
+
+      // if toIndex !== index, send player with hand replaced with flipped cards
       return {
          bottom: this.bottom,
          currentIndex: this.currentIndex,
          lastPlay: this.lastPlay,
          phase: this.phase,
-         players: this.players,
+         players: this.players.map((player, index) =>
+            player.serialize(index !== toIndex)
+         ),
          bet: this.bet,
          landlordIndex: this.landlordIndex,
       };
@@ -40,7 +56,7 @@ export class Game {
       game.currentIndex = data.currentIndex;
       game.lastPlay = data.lastPlay;
       game.phase = data.phase;
-      game.players = data.players;
+      game.players = data.players.map((p) => Player.deserialize(p));
       game.bet = data.bet;
       game.landlordIndex = data.landlordIndex;
       return game;
