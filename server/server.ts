@@ -1,4 +1,3 @@
-import dotenv from "dotenv";
 import express from "express";
 import { setupHandlers } from "handlers";
 import { randomBytes } from "node:crypto";
@@ -8,13 +7,13 @@ import { Server, Socket } from "socket.io";
 import { Player } from "../shared/player";
 import type { Room } from "../shared/room";
 
-dotenv.config();
 const app = express();
 const server = http.createServer(app);
 export const io = new Server(server);
 
 export const rooms = new Map<string, Room>();
 export const profiles = new Map<string, Profile>();
+export const gameSockets = new Map<string, GameSocket>();
 
 export const MENU_ROOM = "*";
 
@@ -70,6 +69,8 @@ io.on("connection", (socket: Socket) => {
 
       gameSocket.emit("created-player", id, auth);
    }
+
+   gameSockets.set(gameSocket.id, gameSocket);
 
    gameSocket.join(MENU_ROOM);
    setupHandlers(gameSocket);

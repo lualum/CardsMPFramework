@@ -98,7 +98,7 @@ function handlePass(): void {
 }
 
 function handleBid(amount: number): void {
-   gs.socket.emit("bid", amount);
+   gs.socket.emit("bet-landlord", amount);
 }
 
 function isPlayersTurn(): boolean {

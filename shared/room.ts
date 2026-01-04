@@ -113,6 +113,7 @@ export class Room {
          } else {
             player.status = PlayerStatus.NOT_READY;
             player.hand = new Hand([]);
+            player.index = undefined; // Clear game position
          }
       }
    }

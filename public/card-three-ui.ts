@@ -32,13 +32,13 @@ export class CardThreeUI {
    private readonly CARD_HEIGHT = 3;
    private readonly HOVER_SCALE = 1.1;
    private readonly SELECTED_LIFT = 0.5;
-   private readonly CARD_SPACING = 0.5;
+   private readonly CARD_SPACING = 0.6;
 
    private readonly CAMERA_FOV = 45;
    private readonly CAMERA_NEAR = 0.1;
    private readonly CAMERA_FAR = 1000;
    private readonly CAMERA_POS_X = 0;
-   private readonly CAMERA_POS_Y = 5;
+   private readonly CAMERA_POS_Y = 10;
    private readonly CAMERA_POS_Z = 25;
 
    constructor(containerId: string) {
@@ -88,13 +88,6 @@ export class CardThreeUI {
    private setupLighting(): void {
       const ambientLight = new THREE.AmbientLight(0xff_ff_ff, 0.7);
       this.scene.add(ambientLight);
-
-      // const mainLight = new THREE.DirectionalLight(0xff_ff_ff, 0.8);
-      // mainLight.position.set(5, 15, 10);
-      // mainLight.castShadow = true;
-      // mainLight.shadow.mapSize.width = 1024;
-      // mainLight.shadow.mapSize.height = 1024;
-      // this.scene.add(mainLight);
    }
 
    private setupEventListeners(): void {
@@ -123,17 +116,19 @@ export class CardThreeUI {
       this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
    }
 
-   // Removed updateRaycastLine method
-
    private onMouseMove(event: MouseEvent): void {
       this.updateMouseCoords(event);
-      // Removed updateRaycastLine call
+
       this.raycaster.setFromCamera(this.mouse, this.camera);
 
       const intersects = this.raycaster.intersectObjects(this.cardMeshes);
 
+      // Reset all cards to their base state (selected or unselected)
       for (const mesh of this.cardMeshes) {
-         if (!mesh.selected) {
+         if (mesh.selected) {
+            mesh.scale.setScalar(1);
+            mesh.position.y = this.SELECTED_LIFT;
+         } else {
             mesh.scale.setScalar(1);
             mesh.position.y = mesh.originalY;
          }
@@ -141,10 +136,16 @@ export class CardThreeUI {
 
       if (intersects.length > 0) {
          const hoveredCard = intersects[0].object as CardMesh;
-         if (!hoveredCard.selected)
-            hoveredCard.scale.setScalar(this.HOVER_SCALE);
+         // Allow hovering for any card, but only show pointer for own cards
+         hoveredCard.scale.setScalar(this.HOVER_SCALE);
+         if (hoveredCard.selected) hoveredCard.position.y = this.SELECTED_LIFT;
 
-         this.renderer.domElement.style.cursor = "pointer";
+         // Only show pointer cursor for current player's cards
+         const playerSeat = gs.player.index;
+         this.renderer.domElement.style.cursor =
+            playerSeat !== undefined && hoveredCard.seat === playerSeat
+               ? "pointer"
+               : "default";
       } else {
          this.renderer.domElement.style.cursor = "default";
       }
@@ -157,6 +158,15 @@ export class CardThreeUI {
 
       if (intersects.length > 0) {
          const clickedMesh = intersects[0].object as CardMesh;
+
+         // Only allow selecting current player's cards
+         const playerSeat = gs.player.index;
+
+         console.log(playerSeat, clickedMesh.seat);
+
+         if (playerSeat === undefined || clickedMesh.seat !== playerSeat)
+            return;
+
          const cardKey = `${clickedMesh.seat}-${clickedMesh.index}`;
 
          if (this.selectedCards.has(cardKey)) {
@@ -171,31 +181,40 @@ export class CardThreeUI {
       }
    }
 
+   private getRelativeSeatIndex(absoluteSeat: number): number {
+      const playerGameIndex = gs.player.index;
+      const totalPlayers = gs.room.game.players.length;
+      if (playerGameIndex === undefined) return absoluteSeat;
+      return (absoluteSeat - playerGameIndex + totalPlayers) % totalPlayers;
+   }
+
    private updateCardPosition(mesh: CardMesh): void {
       const seat = mesh.seat;
       const index = mesh.index;
       const isSelected = mesh.selected;
 
-      // Get hand size for this seat - use actual game data
+      // Get hand size for this seat
       const handSize = this.cardMeshes.filter((m) => m.seat === seat).length;
 
-      // Calculate angle for this seat around the table
       const totalPlayers = Math.max(...this.cardMeshes.map((m) => m.seat)) + 1;
-      const seatAngle = (seat / totalPlayers) * Math.PI * 2;
+      const relativeSeat = this.getRelativeSeatIndex(seat);
+
+      // Check if this is the current player's turn
+      const isCurrentTurn = gs.room.game.currentIndex === seat;
+
+      // Calculate angle for this seat around the table
+      const seatAngle = (relativeSeat / totalPlayers) * Math.PI * 2;
 
       // Calculate position of hand center
       const centerX = Math.sin(seatAngle) * this.TABLE_RADIUS;
       const centerZ = Math.cos(seatAngle) * this.TABLE_RADIUS;
 
-      // Calculate offset for this card within the hand
       const cardOffset = (index - (handSize - 1) / 2) * this.CARD_SPACING;
 
-      // Calculate perpendicular direction for spreading cards
       const perpAngle = seatAngle + Math.PI / 2;
       const offsetX = Math.sin(perpAngle) * cardOffset;
       const offsetZ = Math.cos(perpAngle) * cardOffset;
 
-      // Fixed epsilon calculations - cards should stack slightly toward center
       const epsilonDistance = 0.001 * index;
       const epsilonX = Math.sin(seatAngle) * epsilonDistance;
       const epsilonZ = Math.cos(seatAngle) * epsilonDistance;
@@ -206,11 +225,23 @@ export class CardThreeUI {
 
       mesh.position.set(x, y, z);
       mesh.rotation.set(0, 0, 0);
-      // Rotate card to face center of table
       mesh.rotation.y = seatAngle;
 
       const scale = isSelected ? this.HOVER_SCALE : 1;
       mesh.scale.set(scale, scale, scale);
+
+      // Add emissive glow for current turn
+      if (isCurrentTurn) {
+         (mesh.material as THREE.MeshStandardMaterial).emissive.setHex(
+            0x44_44_ff
+         );
+         (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3;
+      } else {
+         (mesh.material as THREE.MeshStandardMaterial).emissive.setHex(
+            0x00_00_00
+         );
+         (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
+      }
 
       mesh.originalY = y;
    }
@@ -286,7 +317,6 @@ export class CardThreeUI {
       this.cardMeshes = [];
       this.selectedCards.clear();
 
-      // Create new meshes for each player's hand
       for (const [seat, player] of game.players.entries()) {
          for (const [index, card] of player.hand.cards.entries()) {
             const mesh = this.createCardMesh(card, index, seat);
@@ -295,8 +325,6 @@ export class CardThreeUI {
          }
       }
 
-      // Update all positions AFTER all meshes are created
-      // This ensures handSize is calculated correctly for all cards
       for (const mesh of this.cardMeshes) this.updateCardPosition(mesh);
    }
 
@@ -334,7 +362,7 @@ export class CardThreeUI {
          mesh.geometry.dispose();
          (mesh.material as THREE.Material).dispose();
       }
-      // Removed raycastLine disposal
+
       this.renderer.dispose();
       this.renderer.domElement.remove();
    }

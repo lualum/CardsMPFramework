@@ -75,6 +75,9 @@ export class Game {
    startGame(players: Player[]): void {
       this.players = [...players];
 
+      for (const [index, player] of this.players.entries())
+         player.index = index;
+
       this.initializeDeck();
       this.shuffleDeck();
       this.dealCards();

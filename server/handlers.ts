@@ -1,9 +1,9 @@
 import type { GameSocket } from "server";
-import { emitRoomList, io, MENU_ROOM, rooms } from "server";
+import { emitRoomList, gameSockets, io, MENU_ROOM, rooms } from "server";
 import type { Server } from "socket.io";
 import type { Card } from "../shared/card";
 import { GamePhase } from "../shared/game";
-import { Player, PlayerStatus } from "../shared/player";
+import { PlayerStatus } from "../shared/player";
 import { Room, RoomStatus } from "../shared/room";
 
 export function setupHandlers(socket: GameSocket): void {
@@ -38,6 +38,7 @@ export function setupHandlers(socket: GameSocket): void {
    });
 
    socket.on("disconnect", () => {
+      gameSockets.delete(socket.id);
       handlePlayerLeave(socket);
    });
 
@@ -56,13 +57,19 @@ export function setupHandlers(socket: GameSocket): void {
       );
 
       if (socket.room.tryStartRoom()) {
-         const toIndex = socket.room.game.players.findIndex(
-            (p) => p.id === socket.player.id
-         );
-         io.to(socket.room.code).emit(
-            "started-room",
-            socket.room.game.serialize(toIndex === -1 ? undefined : toIndex)
-         );
+         // Send to each socket independently with their own player perspective
+         for (const player of socket.room.players.values()) {
+            const playerSocket = [...gameSockets.values()].find(
+               (s) => s.player.id === player.id
+            );
+
+            if (playerSocket) {
+               playerSocket.emit(
+                  "started-room",
+                  socket.room!.game.serialize(player.index)
+               );
+            }
+         }
       }
    });
 
@@ -130,11 +137,6 @@ function createRoom(roomCode?: string): string | undefined {
    const code = roomCode || randomCode();
    const room = new Room(code);
    rooms.set(code, room);
-
-   if (process.env.dev) {
-      room.addPlayer(new Player("dev1", "DevA", PlayerStatus.READY));
-      room.addPlayer(new Player("dev2", "DevB", PlayerStatus.READY));
-   }
 
    return code;
 }

@@ -54,8 +54,9 @@ export function initGameSocket(): void {
    });
 
    gs.socket.on("started-room", (raw: SerializedGame) => {
-      gs.room.status = RoomStatus.PLAYING;
       gs.room.game = Game.deserialize(raw);
+      gs.player =
+         gs.room.game.players.find((p) => p.id === gs.player.id) ?? gs.player;
 
       for (const player of gs.room.game.players.values())
          console.log(player.hand);
@@ -69,7 +70,7 @@ export function initGameSocket(): void {
    });
 
    gs.socket.on("p-became-landlord", (playerId: string, bottom: Card[]) => {
-      gs.room.game.becomeLandlord(playerId, bottom);
+      gs.room.game.becomeLandlord(bottom);
       updateUIPushChat({
          id: "server",
          message: `${gs.room.players.get(playerId)?.name} is the landlord!`,
